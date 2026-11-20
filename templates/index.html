@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NetMon Dashboard</title>
+<style>
+  :root{
+    --bg:#0f1420; --panel:#171e2e; --panel2:#1d2639; --line:#2a3550;
+    --text:#e6ebf5; --muted:#8c98b3; --up:#22c55e; --down:#ef4444; --warn:#f59e0b; --accent:#6366f1;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,Segoe UI,Roboto,sans-serif}
+  header{display:flex;justify-content:space-between;align-items:center;padding:18px 28px;border-bottom:1px solid var(--line)}
+  header h1{font-size:20px;margin:0}
+  header small{color:var(--muted)}
+  main{padding:24px 28px;max-width:1200px;margin:0 auto}
+  .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:22px}
+  .stat{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px}
+  .stat .label{color:var(--muted);font-size:13px}
+  .stat .value{font-size:28px;font-weight:700;margin-top:4px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px;margin-bottom:26px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;position:relative}
+  .card.down{border-color:var(--down);box-shadow:0 0 0 1px var(--down) inset}
+  .card h3{margin:0 0 2px;font-size:16px}
+  .host{color:var(--muted);font-size:13px;margin-bottom:12px;word-break:break-all}
+  .badge{position:absolute;top:14px;right:14px;font-size:11px;font-weight:700;padding:3px 9px;border-radius:99px;letter-spacing:.5px}
+  .badge.up{background:rgba(34,197,94,.15);color:var(--up)}
+  .badge.down{background:rgba(239,68,68,.15);color:var(--down)}
+  .badge.unknown{background:rgba(245,158,11,.15);color:var(--warn)}
+  .row{display:flex;justify-content:space-between;font-size:13px;color:var(--muted);margin-top:6px}
+  .row b{color:var(--text)}
+  svg.spark{width:100%;height:42px;margin-top:10px}
+  .del{position:absolute;bottom:12px;right:14px;background:none;border:none;color:var(--muted);cursor:pointer;font-size:12px}
+  .del:hover{color:var(--down)}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px;margin-bottom:22px}
+  .panel h2{font-size:15px;margin:0 0 12px}
+  form{display:flex;gap:10px;flex-wrap:wrap}
+  input{background:var(--panel2);border:1px solid var(--line);color:var(--text);padding:9px 12px;border-radius:8px;font-size:14px}
+  input:focus{outline:2px solid var(--accent);border-color:transparent}
+  button.add{background:var(--accent);color:#fff;border:none;padding:9px 18px;border-radius:8px;font-weight:600;cursor:pointer}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  td{padding:8px 4px;border-bottom:1px solid var(--line)}
+  td.ts{color:var(--muted);white-space:nowrap;width:160px}
+  .empty{color:var(--muted);font-size:13px}
+  #err{color:var(--down);font-size:13px;margin-top:8px;min-height:16px}
+  .card{cursor:pointer;transition:transform .12s, border-color .12s}
+  .card:hover{transform:translateY(-2px);border-color:var(--accent)}
+  .card.down:hover{border-color:var(--down)}
+  .hint{color:var(--muted);font-size:11px;margin-top:8px}
+  header .right{display:flex;align-items:center;gap:16px}
+  header a{color:var(--muted);font-size:13px;text-decoration:none;border:1px solid var(--line);padding:6px 12px;border-radius:8px}
+  header a:hover{color:var(--text);border-color:var(--accent)}
+  #modal{position:fixed;inset:0;background:rgba(5,8,15,.7);display:none;align-items:center;justify-content:center;padding:20px;z-index:10}
+  #modal.open{display:flex}
+  .mbox{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:20px;width:min(860px,100%)}
+  .mhead{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px}
+  .mhead h2{margin:0;font-size:17px}
+  .ranges button,.close{background:var(--panel2);border:1px solid var(--line);color:var(--muted);padding:6px 12px;border-radius:8px;cursor:pointer;font-size:13px}
+  .ranges button.active{background:var(--accent);border-color:var(--accent);color:#fff}
+  .close{margin-left:8px}
+  .chartwrap{position:relative;height:300px}
+  .msum{display:flex;gap:22px;flex-wrap:wrap;margin-top:12px;font-size:13px;color:var(--muted)}
+  .msum b{color:var(--text)}
+  @media(max-width:700px){.stats{grid-template-columns:repeat(2,1fr)}}
+</style>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+</head>
+<body>
+<header>
+  <h1>🌐 NetMon Dashboard</h1>
+  <div class="right">
+    <small>Auto refresh: every 5s · checks every {{ interval }}s · <span id="clock"></span></small>
+    <a href="/logout">Logout</a>
+  </div>
+</header>
+
+<div id="modal" onclick="if(event.target===this)closeChart()">
+  <div class="mbox">
+    <div class="mhead">
+      <h2 id="m-title">Latency</h2>
+      <div>
+        <span class="ranges" id="ranges">
+          <button data-h="1" class="active">1h</button>
+          <button data-h="6">6h</button>
+          <button data-h="24">24h</button>
+        </span>
+        <button class="close" onclick="closeChart()">✕ Close</button>
+      </div>
+    </div>
+    <div class="chartwrap"><canvas id="chart"></canvas></div>
+    <div class="msum" id="m-sum"></div>
+  </div>
+</div>
+<main>
+  <section class="stats">
+    <div class="stat"><div class="label">Total devices</div><div class="value" id="s-total">0</div></div>
+    <div class="stat"><div class="label">Online</div><div class="value" id="s-up" style="color:var(--up)">0</div></div>
+    <div class="stat"><div class="label">Offline</div><div class="value" id="s-down" style="color:var(--down)">0</div></div>
+    <div class="stat"><div class="label">Avg latency</div><div class="value" id="s-lat">–</div></div>
+  </section>
+
+  <section class="grid" id="grid"></section>
+
+  <section class="panel">
+    <h2>➕ Add device</h2>
+    <form id="form">
+      <input id="f-name" placeholder="Name (e.g. Lab Router)" required>
+      <input id="f-host" placeholder="IP or hostname (192.168.1.1)" required>
+      <input id="f-port" type="number" placeholder="Port (optional)" min="1" max="65535" style="width:150px">
+      <button class="add" type="submit">Add</button>
+    </form>
+    <div class="empty" style="margin-top:8px">Port empty = ICMP ping. Port dunnama = TCP port check (e.g. 80, 443, 3306).</div>
+    <div id="err"></div>
+  </section>
+
+  <section class="panel">
+    <h2>📜 Recent events</h2>
+    <table id="events"></table>
+  </section>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+function spark(hist){
+  const pts = hist.map((v,i)=>({v,i}));
+  const vals = hist.filter(v=>v!==null);
+  if(vals.length < 2) return '<svg class="spark"></svg>';
+  const max = Math.max(...vals,1), W=260, H=40, n=hist.length-1 || 1;
+  let d='', pen=false;
+  pts.forEach(p=>{
+    if(p.v===null){pen=false;return;}
+    const x=(p.i/n)*W, y=H-4-(p.v/max)*(H-8);
+    d += (pen?'L':'M')+x.toFixed(1)+' '+y.toFixed(1)+' ';
+    pen=true;
+  });
+  // red ticks where check failed
+  const fails = pts.filter(p=>p.v===null).map(p=>`<line x1="${(p.i/n)*W}" x2="${(p.i/n)*W}" y1="0" y2="${H}" stroke="#ef4444" stroke-opacity=".5"/>`).join('');
+  return `<svg class="spark" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">${fails}<path d="${d}" fill="none" stroke="#6366f1" stroke-width="2" vector-effect="non-scaling-stroke"/></svg>`;
+}
+
+// session expire unama login page ekata yawanawa
+async function api(url, opts){
+  const r = await fetch(url, opts);
+  if(r.status === 401){ location.href = '/login'; throw new Error('login required'); }
+  return r;
+}
+
+let chart = null, curDev = null, curHours = 1;
+
+function openChart(id){ curDev = id; $('modal').classList.add('open'); drawChart(); }
+function closeChart(){ $('modal').classList.remove('open'); curDev = null; if(chart){chart.destroy(); chart=null;} }
+document.addEventListener('keydown', e=>{ if(e.key==='Escape') closeChart(); });
+
+document.querySelectorAll('#ranges button').forEach(b=>b.addEventListener('click', ()=>{
+  document.querySelectorAll('#ranges button').forEach(x=>x.classList.remove('active'));
+  b.classList.add('active'); curHours = +b.dataset.h; drawChart();
+}));
+
+async function drawChart(){
+  if(curDev===null) return;
+  const r = await api(`/api/devices/${curDev}/history?hours=${curHours}`);
+  const data = await r.json();
+  $('m-title').textContent = data.name + ' - latency (last ' + curHours + 'h)';
+
+  const labels = data.points.map(p => curHours===24 ? p.ts.slice(5,16) : p.ts.slice(11,19));
+  const lat = data.points.map(p => p.up ? p.latency : null);
+  const fails = data.points.map(p => p.up ? null : 0);
+
+  if(chart) chart.destroy();
+  chart = new Chart($('chart'), {
+    type:'line',
+    data:{ labels, datasets:[
+      { label:'Latency (ms)', data:lat, borderColor:'#6366f1', backgroundColor:'rgba(99,102,241,.15)',
+        fill:true, tension:.25, pointRadius:data.points.length>80?0:3, borderWidth:2, spanGaps:false },
+      { label:'Failed check', data:fails, borderColor:'#ef4444', backgroundColor:'#ef4444',
+        showLine:false, pointRadius:5, pointStyle:'crossRot' }
+    ]},
+    options:{ responsive:true, maintainAspectRatio:false, animation:false,
+      interaction:{mode:'index', intersect:false},
+      scales:{
+        x:{ ticks:{color:'#8c98b3', maxTicksLimit:8}, grid:{color:'#2a3550'} },
+        y:{ beginAtZero:true, ticks:{color:'#8c98b3'}, grid:{color:'#2a3550'}, title:{display:true,text:'ms',color:'#8c98b3'} }
+      },
+      plugins:{ legend:{labels:{color:'#e6ebf5'}} } }
+  });
+
+  const s = data.summary;
+  $('m-sum').innerHTML = data.points.length
+    ? `<span>Min: <b>${s.min ?? '–'} ms</b></span><span>Avg: <b>${s.avg ?? '–'} ms</b></span><span>Max: <b>${s.max ?? '–'} ms</b></span><span>Failed checks: <b>${s.failed} / ${s.total}</b></span>`
+    : '<span>Me kalaya athule data naha (monitor eka run wenna thawa tikak denna).</span>';
+}
+
+async function load(){
+  const [devs, evs] = await Promise.all([
+    api('/api/devices').then(r=>r.json()),
+    api('/api/events').then(r=>r.json())
+  ]);
+  if(curDev!==null) drawChart();   // modal open nam chart eka live update
+
+  const up = devs.filter(d=>d.status==='up').length;
+  const down = devs.filter(d=>d.status==='down').length;
+  const lats = devs.filter(d=>d.status==='up' && d.latency!=null).map(d=>d.latency);
+  $('s-total').textContent = devs.length;
+  $('s-up').textContent = up;
+  $('s-down').textContent = down;
+  $('s-lat').textContent = lats.length ? (lats.reduce((a,b)=>a+b,0)/lats.length).toFixed(1)+' ms' : '–';
+
+  $('grid').innerHTML = devs.map(d=>{
+    const target = d.port ? `${esc(d.host)}:${d.port} (TCP)` : `${esc(d.host)} (ping)`;
+    return `<div class="card ${d.status==='down'?'down':''}" onclick="openChart(${d.id})">
+      <span class="badge ${d.status}">${d.status.toUpperCase()}</span>
+      <h3>${esc(d.name)}</h3>
+      <div class="host">${target}</div>
+      <div class="row"><span>Latency</span><b>${d.latency!=null && d.status!=='down' ? d.latency+' ms' : '–'}</b></div>
+      <div class="row"><span>Uptime (24h)</span><b>${d.uptime!=null ? d.uptime+'%' : '–'}</b></div>
+      <div class="row"><span>Last check</span><b>${d.last_checked ? d.last_checked.slice(11) : '–'}</b></div>
+      ${spark(d.history)}
+      <div class="hint">Click karala latency chart eka balanna</div>
+      <button class="del" onclick="event.stopPropagation();delDev(${d.id})">🗑 remove</button>
+    </div>`;
+  }).join('') || '<div class="empty">Devices naha. Pahalin add karanna.</div>';
+
+  $('events').innerHTML = evs.length
+    ? evs.map(e=>`<tr><td class="ts">${esc(e.ts)}</td><td>${esc(e.message)}</td></tr>`).join('')
+    : '<tr><td class="empty">Thama events naha (device up/down unama methanata enawa).</td></tr>';
+}
+
+async function delDev(id){
+  if(!confirm('Me device eka remove karanna da?')) return;
+  await api('/api/devices/'+id,{method:'DELETE'});
+  load();
+}
+
+$('form').addEventListener('submit', async e=>{
+  e.preventDefault();
+  $('err').textContent='';
+  const r = await api('/api/devices',{
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({name:$('f-name').value, host:$('f-host').value, port:$('f-port').value})
+  });
+  if(!r.ok){ $('err').textContent = (await r.json()).error || 'Error'; return; }
+  e.target.reset(); load();
+});
+
+setInterval(()=>{ $('clock').textContent = new Date().toLocaleTimeString(); }, 1000);
+load(); setInterval(load, 5000);
+</script>
+</body>
+</html>
